@@ -1,0 +1,258 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <winsock2.h>
+#include <windows.h>
+#include <locale.h>
+
+#pragma comment(lib, "ws2_32.lib")
+
+#define BOARD_IP "192.168.1.10"
+#define BOARD_PORT 12345
+#define BUFFER_SIZE 1024
+
+// Функция для настройки кодировки консоли Windows
+void setup_console_encoding() {
+    // Устанавливаем локаль для поддержки UTF-8
+    setlocale(LC_ALL, "ru_RU.UTF-8");
+
+    // Для Windows устанавливаем кодировку консоли в UTF-8
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+
+    // Дополнительные настройки для правильного отображения русского
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED);
+}
+
+void print_menu() {
+    printf("\n");
+    printf("=================================================\n");
+    printf("        КЛИЕНТ ДЛЯ ПЛАТЫ NEXYS 4 DDR\n");
+    printf("=================================================\n");
+    printf("Команды:\n");
+    printf("  <слово>    - Отправить слово на плату\n");
+    printf("  test       - Тестовый набор слов\n");
+    printf("  clear      - Очистить экран\n");
+    printf("  help       - Показать это меню\n");
+    printf("  quit       - Выход из программы\n");
+    printf("=================================================\n");
+}
+
+void print_colored(const char* text, int color) {
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole, color);
+    printf("%s", text);
+    SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_RED);
+}
+
+int send_to_board(SOCKET sock, const char* word, char* response) {
+    char buffer[BUFFER_SIZE];
+
+    // Отправляем слово на плату
+    sprintf(buffer, "%s\n", word);
+    if (send(sock, buffer, strlen(buffer), 0) == SOCKET_ERROR) {
+        print_colored("Ошибка отправки данных!\n", FOREGROUND_RED);
+        return 0;
+    }
+
+    print_colored(">> Отправлено: ", FOREGROUND_GREEN);
+    printf("'%s'\n", word);
+
+    // Получаем ответ от платы
+    int bytes_received = recv(sock, buffer, BUFFER_SIZE - 1, 0);
+    if (bytes_received > 0) {
+        buffer[bytes_received] = '\0';
+
+        // Убираем символы новой строки из ответа
+        char* newline = strchr(buffer, '\n');
+        if (newline) *newline = '\0';
+        newline = strchr(buffer, '\r');
+        if (newline) *newline = '\0';
+
+        strcpy(response, buffer);
+
+        print_colored("<< Получено: ", FOREGROUND_BLUE);
+        printf("'%s'\n", response);
+        return 1;
+    }
+
+    print_colored("Не удалось получить ответ от платы!\n", FOREGROUND_RED);
+    return 0;
+}
+
+void test_suite(SOCKET sock) {
+    // Тестовый набор слов (можно использовать русские)
+    char* test_words[] = {
+        "Hello",
+        "World",
+        "TEST",
+        "MiXeD",
+        "123Numbers",
+        "Привет",
+        "Тест",
+        "Русский",
+        NULL
+    };
+
+    printf("\n");
+    print_colored("=== ЗАПУСК ТЕСТОВОГО НАБОРА ===\n", FOREGROUND_GREEN | FOREGROUND_BLUE);
+
+    for (int i = 0; test_words[i] != NULL; i++) {
+        char response[BUFFER_SIZE];
+        printf("\nТест %d: ", i + 1);
+
+        if (send_to_board(sock, test_words[i], response)) {
+            print_colored("УСПЕХ", FOREGROUND_GREEN);
+            printf(" - '%s' -> '%s'", test_words[i], response);
+        } else {
+            print_colored("ОШИБКА", FOREGROUND_RED);
+            printf(" - '%s'", test_words[i]);
+        }
+
+        Sleep(300); // Пауза между запросами
+    }
+
+    printf("\n\n");
+    print_colored("=== ТЕСТИРОВАНИЕ ЗАВЕРШЕНО ===\n", FOREGROUND_GREEN | FOREGROUND_BLUE);
+}
+
+void clear_screen() {
+    system("cls");
+}
+
+void print_status(SOCKET sock, int is_connected) {
+    printf("\n");
+    print_colored("=== СТАТУС СИСТЕМЫ ===\n", FOREGROUND_GREEN);
+
+    if (is_connected) {
+        print_colored("Подключение: ", FOREGROUND_GREEN);
+        printf("АКТИВНО\n");
+        print_colored("Адрес платы: ", FOREGROUND_GREEN);
+        printf("%s:%d\n", BOARD_IP, BOARD_PORT);
+    } else {
+        print_colored("Подключение: ", FOREGROUND_RED);
+        printf("НЕТ\n");
+    }
+
+    print_colored("Протокол: ", FOREGROUND_GREEN);
+    printf("TCP\n");
+    print_colored("Порт: ", FOREGROUND_GREEN);
+    printf("%d\n", BOARD_PORT);
+}
+
+int main() {
+    WSADATA wsaData;
+    SOCKET client_socket;
+    struct sockaddr_in server_addr;
+    char input[256];
+    char response[BUFFER_SIZE];
+    int is_connected = 0;
+
+    // Настройка кодировки консоли
+    setup_console_encoding();
+
+    printf("Клиент для платы Nexys 4 DDR\n");
+    printf("Поддержка русского языка включена\n\n");
+
+    // Инициализация Winsock
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        print_colored("Ошибка инициализации Winsock!\n", FOREGROUND_RED);
+        return 1;
+    }
+
+    // Создание сокета
+    client_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (client_socket == INVALID_SOCKET) {
+        print_colored("Ошибка создания сокета!\n", FOREGROUND_RED);
+        WSACleanup();
+        return 1;
+    }
+
+    // Настройка адреса сервера
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(BOARD_PORT);
+    server_addr.sin_addr.s_addr = inet_addr(BOARD_IP);
+
+    // Подключение к плате
+    print_colored("Подключение к плате ", FOREGROUND_GREEN);
+    printf("%s:%d...\n", BOARD_IP, BOARD_PORT);
+
+    if (connect(client_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+        print_colored("Ошибка подключения к плате!\n", FOREGROUND_RED);
+        print_colored("Убедитесь, что:\n", FOREGROUND_YELLOW);
+        printf("  1. Плата включена и работает\n");
+        printf("  2. IP-адрес правильный: %s\n", BOARD_IP);
+        printf("  3. Порт правильный: %d\n", BOARD_PORT);
+        printf("  4. Сетевой кабель подключен\n");
+
+        closesocket(client_socket);
+        WSACleanup();
+
+        printf("\nНажмите Enter для выхода...");
+        getchar();
+        return 1;
+    }
+
+    is_connected = 1;
+    print_colored("✅ Успешно подключено к плате!\n\n", FOREGROUND_GREEN);
+
+    print_menu();
+
+    // Главный цикл взаимодействия
+    while (1) {
+        printf("\n");
+        print_colored("Введите слово или команду: ", FOREGROUND_YELLOW);
+
+        if (fgets(input, sizeof(input), stdin) == NULL) {
+            break;
+        }
+
+        // Убираем символ новой строки
+        input[strcspn(input, "\n")] = 0;
+
+        if (strlen(input) == 0) {
+            continue;
+        }
+
+        // Обработка команд
+        if (strcmp(input, "quit") == 0 || strcmp(input, "exit") == 0) {
+            print_colored("Завершение работы...\n", FOREGROUND_YELLOW);
+            break;
+        }
+        else if (strcmp(input, "test") == 0) {
+            test_suite(client_socket);
+        }
+        else if (strcmp(input, "clear") == 0) {
+            clear_screen();
+            print_menu();
+        }
+        else if (strcmp(input, "help") == 0) {
+            print_menu();
+        }
+        else if (strcmp(input, "status") == 0) {
+            print_status(client_socket, is_connected);
+        }
+        else {
+            // Отправка произвольного слова на плату
+            if (send_to_board(client_socket, input, response)) {
+                printf("\n");
+                print_colored("🔁 РЕЗУЛЬТАТ: ", FOREGROUND_CYAN);
+                printf("'%s' -> '%s'\n", input, response);
+            } else {
+                print_colored("Не удалось отправить слово на плату\n", FOREGROUND_RED);
+            }
+        }
+    }
+
+    // Завершение работы
+    print_colored("\nЗакрытие соединения...\n", FOREGROUND_YELLOW);
+    closesocket(client_socket);
+    WSACleanup();
+
+    print_colored("Работа программы завершена.\n", FOREGROUND_GREEN);
+    printf("Нажмите Enter для выхода...");
+    getchar();
+
+    return 0;
+}

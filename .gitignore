@@ -1,0 +1,34 @@
+# Vivado файлы
+*.jou
+*.log
+*.str
+*.xpr
+*.xml
+*.html
+*.txt
+*.tcl
+
+# SDK файлы
+.settings/
+.metadata/
+*.launch
+
+# Временные файлы
+*.tmp
+*.temp
+*~
+*.bak
+
+# Бинарные файлы
+*.bit
+*.bin
+*.elf
+*.o
+*.a
+*.exe
+
+# Папки
+Debug/
+Release/
+hw_platform/
+bsp/

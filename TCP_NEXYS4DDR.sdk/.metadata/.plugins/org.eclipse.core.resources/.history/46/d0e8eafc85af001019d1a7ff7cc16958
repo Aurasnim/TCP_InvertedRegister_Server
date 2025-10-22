@@ -1,0 +1,146 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <winsock2.h>
+#include <windows.h>
+
+#pragma comment(lib, "ws2_32.lib")
+
+#define BOARD_IP "192.168.1.10"
+#define BOARD_PORT 12345
+#define BUFFER_SIZE 1024
+
+void print_menu() {
+    printf("\n=============================================\n");
+    printf("    КЛИЕНТ ДЛЯ РАБОТЫ С ПЛАТОЙ NEXYS 4 DDR\n");
+    printf("=============================================\n");
+    printf("Команды:\n");
+    printf("  <слово>  - Отправить слово на плату\n");
+    printf("  test     - Тестовый набор\n");
+    printf("  clear    - Очистить экран\n");
+    printf("  quit     - Выход\n");
+    printf("=============================================\n");
+}
+
+int send_to_board(SOCKET sock, const char* word, char* response) {
+    char buffer[BUFFER_SIZE];
+
+    // Отправляем слово
+    sprintf(buffer, "%s\n", word);
+    if (send(sock, buffer, strlen(buffer), 0) == SOCKET_ERROR) {
+        printf("Ошибка отправки!\n");
+        return 0;
+    }
+
+    printf("Отправлено: '%s'\n", word);
+
+    // Получаем ответ
+    int bytes_received = recv(sock, buffer, BUFFER_SIZE - 1, 0);
+    if (bytes_received > 0) {
+        buffer[bytes_received] = '\0';
+        strcpy(response, buffer);
+        printf("Получено: '%s'\n", response);
+        return 1;
+    }
+
+    return 0;
+}
+
+void test_suite(SOCKET sock) {
+    char* test_words[] = {
+        "Hello", "World", "TEST", "MiXeD",
+        "123Numbers", "Python", "Socket", NULL
+    };
+
+    printf("\n=== ТЕСТОВЫЙ НАБОР ===\n");
+
+    for (int i = 0; test_words[i] != NULL; i++) {
+        char response[BUFFER_SIZE];
+        if (send_to_board(sock, test_words[i], response)) {
+            printf("✅ '%s' -> '%s'\n", test_words[i], response);
+        } else {
+            printf("❌ Ошибка при отправке '%s'\n", test_words[i]);
+        }
+        Sleep(500); // Пауза 500мс
+    }
+
+    printf("=== ТЕСТ ЗАВЕРШЕН ===\n");
+}
+
+int main() {
+    WSADATA wsaData;
+    SOCKET client_socket;
+    struct sockaddr_in server_addr;
+    char input[256];
+    char response[BUFFER_SIZE];
+
+    // Инициализация Winsock
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        printf("Ошибка инициализации Winsock!\n");
+        return 1;
+    }
+
+    // Создание сокета
+    client_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (client_socket == INVALID_SOCKET) {
+        printf("Ошибка создания сокета!\n");
+        WSACleanup();
+        return 1;
+    }
+
+    // Настройка адреса сервера
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(BOARD_PORT);
+    server_addr.sin_addr.s_addr = inet_addr(BOARD_IP);
+
+    // Подключение к плате
+    printf("Подключение к плате %s:%d...\n", BOARD_IP, BOARD_PORT);
+    if (connect(client_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+        printf("Ошибка подключения к плате!\n");
+        closesocket(client_socket);
+        WSACleanup();
+        return 1;
+    }
+
+    printf("✅ Успешно подключено к плате!\n");
+
+    print_menu();
+
+    // Главный цикл
+    while (1) {
+        printf("\nВведите слово или команду: ");
+        fgets(input, sizeof(input), stdin);
+
+        // Убираем символ новой строки
+        input[strcspn(input, "\n")] = 0;
+
+        if (strlen(input) == 0) continue;
+
+        if (strcmp(input, "quit") == 0 || strcmp(input, "exit") == 0) {
+            break;
+        }
+        else if (strcmp(input, "test") == 0) {
+            test_suite(client_socket);
+        }
+        else if (strcmp(input, "clear") == 0) {
+            system("cls");
+            print_menu();
+        }
+        else if (strcmp(input, "help") == 0) {
+            print_menu();
+        }
+        else {
+            // Отправка слова на плату
+            if (send_to_board(client_socket, input, response)) {
+                printf("🔁 Результат: '%s' -> '%s'\n", input, response);
+            }
+        }
+    }
+
+    // Завершение
+    closesocket(client_socket);
+    WSACleanup();
+    printf("Работа завершена.\n");
+
+    return 0;
+}

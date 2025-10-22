@@ -1,0 +1,13 @@
+23:43:05 **** Incremental Build of configuration Debug for project echo_server ****
+make all 
+'Building file: ../src/pc_client.c'
+'Invoking: MicroBlaze gcc compiler'
+mb-gcc -Wall -O0 -g3 -c -fmessage-length=0 -MT"src/pc_client.o" -I../../echo_server_bsp/microblaze_0/include -mlittle-endian -mcpu=v11.0 -mxl-soft-mul -Wl,--no-relax -ffunction-sections -fdata-sections -MMD -MP -MF"src/pc_client.d" -MT"src/pc_client.o" -o "src/pc_client.o" "../src/pc_client.c"
+../src/pc_client.c:4:10: fatal error: winsock2.h: No such file or directory
+ #include <winsock2.h>
+          ^~~~~~~~~~~~
+compilation terminated.
+make: *** [src/subdir.mk:59: src/pc_client.o] Error 1
+
+23:43:07 Build Finished (took 1s.264ms)
+

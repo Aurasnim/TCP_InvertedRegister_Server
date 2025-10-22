@@ -1,0 +1,209 @@
+#include <stdio.h>
+#include <string.h>
+#include "xil_printf.h"
+#include "xparameters.h"
+#include "xuartns550_l.h"
+
+#define BUFFER_SIZE 256
+#define INPUT_BUFFER_SIZE 128
+
+/* Внешние функции из custom_app.c */
+extern void get_network_stats(int *connections, int *data_flag, char *last_data);
+extern void process_received_data(char *data, int length);
+
+/* Структура для команд */
+typedef struct {
+    const char *name;
+    const char *description;
+    void (*function)(void);
+} command_t;
+
+/* Прототипы функций */
+void console_init(void);
+void console_process(void);
+void print_menu(void);
+void execute_command(const char *input);
+void cmd_help(void);
+void cmd_status(void);
+void cmd_send_data(void);
+void cmd_network_info(void);
+void cmd_clear_screen(void);
+void cmd_process_data(void);
+
+/* Глобальные переменные */
+char input_buffer[INPUT_BUFFER_SIZE];
+int input_index = 0;
+
+/* Таблица команд */
+command_t commands[] = {
+    {"help", "Показать список команд", cmd_help},
+    {"status", "Показать статус системы", cmd_status},
+    {"send", "Отправить тестовые данные", cmd_send_data},
+    {"netinfo", "Показать сетевую информацию", cmd_network_info},
+    {"process", "Обработать тестовые данные", cmd_process_data},
+    {"clear", "Очистить экран", cmd_clear_screen},
+    {NULL, NULL, NULL}
+};
+
+/* Инициализация консоли */
+void console_init(void) {
+    input_index = 0;
+    memset(input_buffer, 0, sizeof(input_buffer));
+
+    xil_printf("\r\n\n");
+    xil_printf("=========================================\r\n");
+    xil_printf("    КОНСОЛЬНОЕ ПРИЛОЖЕНИЕ ПЛАТЫ\r\n");
+    xil_printf("=========================================\r\n");
+    print_menu();
+    xil_printf("\r\n> ");
+}
+
+/* Главная функция обработки консоли */
+void console_process(void) {
+    char c;
+
+    /* Проверяем наличие данных в UART */
+    if (XUartNs550_RecvByte(STDOUT_BASEADDR) != 0) {
+        c = XUartNs550_ReadReg(STDOUT_BASEADDR, XUN_FIFO_RCVR);
+
+        /* Эхо символа */
+        xil_printf("%c", c);
+
+        /* Обработка Enter */
+        if (c == '\r' || c == '\n') {
+            xil_printf("\r\n");
+
+            if (input_index > 0) {
+                input_buffer[input_index] = '\0';
+                execute_command(input_buffer);
+            }
+
+            input_index = 0;
+            memset(input_buffer, 0, sizeof(input_buffer));
+            xil_printf("> ");
+        }
+        /* Обработка Backspace */
+        else if (c == 0x7F || c == 0x08) {
+            if (input_index > 0) {
+                input_index--;
+                input_buffer[input_index] = '\0';
+                xil_printf("\b \b");
+            }
+        }
+        /* Обычный символ */
+        else if (input_index < INPUT_BUFFER_SIZE - 1) {
+            input_buffer[input_index++] = c;
+        }
+    }
+}
+
+/* Выполнение команды */
+void execute_command(const char *input) {
+    int i;
+    int command_found = 0;
+
+    /* Пропускаем пробелы в начале */
+    while (*input == ' ') input++;
+
+    /* Поиск команды в таблице */
+    for (i = 0; commands[i].name != NULL; i++) {
+        if (strncmp(input, commands[i].name, strlen(commands[i].name)) == 0) {
+            commands[i].function();
+            command_found = 1;
+            break;
+        }
+    }
+
+    if (!command_found) {
+        xil_printf("Неизвестная команда: '%s'\r\n", input);
+        xil_printf("Введите 'help' для списка команд\r\n");
+    }
+}
+
+/* Команда: помощь */
+void cmd_help(void) {
+    int i;
+
+    xil_printf("\r\n=== Доступные команды ===\r\n");
+    for (i = 0; commands[i].name != NULL; i++) {
+        xil_printf("  %-10s - %s\r\n", commands[i].name, commands[i].description);
+    }
+    xil_printf("==========================\r\n");
+}
+
+/* Команда: статус */
+void cmd_status(void) {
+    int connections, data_flag;
+    char last_data[256];
+
+    get_network_stats(&connections, &data_flag, last_data);
+
+    xil_printf("\r\n=== Статус системы ===\r\n");
+    xil_printf("Плата: Nexys 4 DDR\r\n");
+    xil_printf("Процессор: MicroBlaze\r\n");
+    xil_printf("Сетевой режим: Активен\r\n");
+    xil_printf("Активных соединений: %d\r\n", connections);
+    xil_printf("Порт: 12345\r\n");
+    xil_printf("IP: 192.168.1.10\r\n");
+
+    if (data_flag) {
+        xil_printf("Последние данные: %s\r\n", last_data);
+    } else {
+        xil_printf("Статус: Ожидание данных\r\n");
+    }
+}
+
+/* Команда: отправка тестовых данных */
+void cmd_send_data(void) {
+    xil_printf("\r\n=== Отправка тестовых данных ===\r\n");
+    xil_printf("Формирование тестового пакета...\r\n");
+    xil_printf("Данные: {sensor: 'temp', value: 25.5}\r\n");
+    xil_printf("Пакет готов к отправке\r\n");
+    xil_printf("(В реальном приложении здесь будет сетевой вызов)\r\n");
+}
+
+/* Команда: обработка данных */
+void cmd_process_data(void) {
+    char test_data[] = "Test Data From Console 123";
+    xil_printf("\r\n=== Обработка тестовых данных ===\r\n");
+    xil_printf("Исходные данные: %s\r\n", test_data);
+
+    process_received_data(test_data, strlen(test_data));
+
+    xil_printf("Обработанные данные: %s\r\n", test_data);
+}
+
+/* Команда: сетевая информация */
+void cmd_network_info(void) {
+    xil_printf("\r\n=== Сетевая информация ===\r\n");
+    xil_printf("MAC: 00:0A:35:00:01:02\r\n");
+    xil_printf("IP: 192.168.1.10\r\n");
+    xil_printf("Mask: 255.255.255.0\r\n");
+    xil_printf("Gateway: 192.168.1.1\r\n");
+    xil_printf("Порт: 12345\r\n");
+    xil_printf("Протокол: TCP\r\n");
+}
+
+/* Команда: очистка экрана */
+void cmd_clear_screen(void) {
+    int i;
+    for (i = 0; i < 50; i++) {
+        xil_printf("\r\n");
+    }
+    xil_printf("=========================================\r\n");
+    xil_printf("    КОНСОЛЬНОЕ ПРИЛОЖЕНИЕ ПЛАТЫ\r\n");
+    xil_printf("=========================================\r\n");
+    print_menu();
+    xil_printf("\r\n> ");
+}
+
+/* Печать меню */
+void print_menu(void) {
+    xil_printf("Доступные команды:\r\n");
+    xil_printf("  help    - показать команды\r\n");
+    xil_printf("  status  - статус системы\r\n");
+    xil_printf("  send    - отправить данные\r\n");
+    xil_printf("  process - обработать данные\r\n");
+    xil_printf("  netinfo - сетевая информация\r\n");
+    xil_printf("  clear   - очистить экран\r\n");
+}

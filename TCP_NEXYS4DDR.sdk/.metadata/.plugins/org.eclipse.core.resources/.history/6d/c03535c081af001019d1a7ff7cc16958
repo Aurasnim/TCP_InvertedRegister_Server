@@ -1,0 +1,166 @@
+#include <stdio.h>
+#include <string.h>
+#include "xil_printf.h"
+#include "xparameters.h"
+
+#define BUFFER_SIZE 256
+
+/* Внешние функции из custom_app.c */
+extern void get_network_stats(int *connections, int *data_flag, char *last_data);
+extern void process_received_data(char *data, int length);
+
+/* Структура для команд */
+typedef struct {
+    const char *name;
+    const char *description;
+    void (*function)(void);
+} command_t;
+
+/* Прототипы функций */
+void console_init(void);
+void console_demo_mode(void);
+void print_menu(void);
+void cmd_help(void);
+void cmd_status(void);
+void cmd_send_data(void);
+void cmd_network_info(void);
+void cmd_process_data(void);
+
+/* Таблица команд */
+command_t commands[] = {
+    {"help", "Показать список команд", cmd_help},
+    {"status", "Показать статус системы", cmd_status},
+    {"send", "Отправить тестовые данные", cmd_send_data},
+    {"netinfo", "Показать сетевую информацию", cmd_network_info},
+    {"process", "Обработать тестовые данные", cmd_process_data},
+    {NULL, NULL, NULL}
+};
+
+/* Глобальные переменные для демо-режима */
+static int demo_counter = 0;
+static int current_command = 0;
+
+/* Инициализация консоли */
+void console_init(void) {
+    xil_printf("\r\n\n");
+    xil_printf("=========================================\r\n");
+    xil_printf("    КОНСОЛЬНОЕ ПРИЛОЖЕНИЕ ПЛАТЫ\r\n");
+    xil_printf("=========================================\r\n");
+    xil_printf("Плата: Nexys 4 DDR\r\n");
+    xil_printf("Режим: Демонстрационный\r\n");
+    xil_printf("Автоматический цикл команд каждые 5 сек\r\n");
+    print_menu();
+}
+
+/* Демо-режим консоли (автоматическое выполнение команд) */
+void console_demo_mode(void) {
+    /* Меняем команду каждые ~5 секунд */
+    if (demo_counter++ > 5000000) {
+        demo_counter = 0;
+
+        xil_printf("\r\n--- [Демо %d] ---\r\n", current_command + 1);
+
+        /* Поочередно выполняем команды */
+        switch(current_command) {
+            case 0:
+                cmd_status();
+                break;
+            case 1:
+                cmd_process_data();
+                break;
+            case 2:
+                cmd_network_info();
+                break;
+            case 3:
+                cmd_send_data();
+                break;
+            case 4:
+                cmd_help();
+                xil_printf("\r\n--- [Демо] Цикл завершен, начинаем сначала ---\r\n");
+                current_command = -1;
+                break;
+        }
+
+        current_command++;
+    }
+}
+
+/* Команда: помощь */
+void cmd_help(void) {
+    int i;
+
+    xil_printf("\r\n=== Доступные команды ===\r\n");
+    for (i = 0; commands[i].name != NULL; i++) {
+        xil_printf("  %-10s - %s\r\n", commands[i].name, commands[i].description);
+    }
+    xil_printf("==========================\r\n");
+}
+
+/* Команда: статус */
+void cmd_status(void) {
+    int connections, data_flag;
+    char last_data[256];
+
+    get_network_stats(&connections, &data_flag, last_data);
+
+    xil_printf("\r\n=== Статус системы ===\r\n");
+    xil_printf("Плата: Nexys 4 DDR\r\n");
+    xil_printf("Процессор: MicroBlaze\r\n");
+    xil_printf("Сетевой режим: Активен\r\n");
+    xil_printf("Активных TCP соединений: %d\r\n", connections);
+    xil_printf("TCP порт: 12345\r\n");
+    xil_printf("IP адрес: 192.168.1.10\r\n");
+
+    if (data_flag && last_data[0] != '\0') {
+        xil_printf("Последние данные: %s\r\n", last_data);
+    } else {
+        xil_printf("Статус: Ожидание сетевых данных\r\n");
+    }
+}
+
+/* Команда: отправка тестовых данных */
+void cmd_send_data(void) {
+    xil_printf("\r\n=== Тестовые данные ===\r\n");
+    xil_printf("Пример данных для отправки:\r\n");
+    xil_printf("1. Hello World\r\n");
+    xil_printf("2. Temperature: 23.5C\r\n");
+    xil_printf("3. Sensor Data Packet\r\n");
+    xil_printf("Подключитесь к порту 12345 для отправки\r\n");
+}
+
+/* Команда: обработка данных */
+void cmd_process_data(void) {
+    char test_data[] = "Demo Data 123 ABC";
+    xil_printf("\r\n=== Обработка данных ===\r\n");
+    xil_printf("Исходные: %s\r\n", test_data);
+
+    /* Сохраняем копию */
+    char original_data[64];
+    strcpy(original_data, test_data);
+
+    /* Обрабатываем данные */
+    process_received_data(test_data, strlen(test_data));
+
+    xil_printf("Результат: %s\r\n", test_data);
+}
+
+/* Команда: сетевая информация */
+void cmd_network_info(void) {
+    xil_printf("\r\n=== Сетевая информация ===\r\n");
+    xil_printf("MAC: 00:0A:35:00:01:02\r\n");
+    xil_printf("IP: 192.168.1.10\r\n");
+    xil_printf("Mask: 255.255.255.0\r\n");
+    xil_printf("Gateway: 192.168.1.1\r\n");
+    xil_printf("Port: 12345\r\n");
+    xil_printf("Protocol: TCP\r\n");
+}
+
+/* Печать меню */
+void print_menu(void) {
+    xil_printf("\r\nДемо-команды:\r\n");
+    xil_printf("  status  - статус системы\r\n");
+    xil_printf("  process - обработка данных\r\n");
+    xil_printf("  netinfo - сетевая информация\r\n");
+    xil_printf("  send    - тестовые данные\r\n");
+    xil_printf("  help    - список команд\r\n");
+}

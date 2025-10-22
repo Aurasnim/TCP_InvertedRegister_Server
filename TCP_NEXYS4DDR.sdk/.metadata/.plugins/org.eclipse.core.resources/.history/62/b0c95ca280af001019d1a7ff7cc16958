@@ -1,0 +1,281 @@
+#include <stdio.h>
+#include <string.h>
+#include "xil_printf.h"
+#include "xparameters.h"
+#include "xuartlite_l.h"  // Правильный UART для Nexys 4 DDR
+
+#define BUFFER_SIZE 256
+#define INPUT_BUFFER_SIZE 128
+
+/* Внешние функции из custom_app.c */
+extern void get_network_stats(int *connections, int *data_flag, char *last_data);
+extern void process_received_data(char *data, int length);
+
+/* Структура для команд */
+typedef struct {
+    const char *name;
+    const char *description;
+    void (*function)(void);
+} command_t;
+
+/* Прототипы функций */
+void console_init(void);
+void console_process(void);
+void print_menu(void);
+void execute_command(const char *input);
+void cmd_help(void);
+void cmd_status(void);
+void cmd_send_data(void);
+void cmd_network_info(void);
+void cmd_clear_screen(void);
+void cmd_process_data(void);
+
+/* Глобальные переменные */
+char input_buffer[INPUT_BUFFER_SIZE];
+int input_index = 0;
+
+/* Таблица команд */
+command_t commands[] = {
+    {"help", "Показать список команд", cmd_help},
+    {"status", "Показать статус системы", cmd_status},
+    {"send", "Отправить тестовые данные", cmd_send_data},
+    {"netinfo", "Показать сетевую информацию", cmd_network_info},
+    {"process", "Обработать тестовые данные", cmd_process_data},
+    {"clear", "Очистить экран", cmd_clear_screen},
+    {NULL, NULL, NULL}
+};
+
+/* Функция проверки наличия данных в UART */
+int check_uart_input(void) {
+    /* Проверяем регистр статуса UART Lite */
+    return (XUartLite_ReadReg(XPAR_AXI_UARTLITE_0_BASEADDR, XUL_STATUS_REG_OFFSET) & XUL_SR_RX_FIFO_VALID_DATA);
+}
+
+/* Функция чтения символа из UART */
+char read_uart_char(void) {
+    /* Читаем данные из приемного FIFO */
+    return (char)XUartLite_ReadReg(XPAR_AXI_UARTLITE_0_BASEADDR, XUL_RX_FIFO_OFFSET);
+}
+
+/* Инициализация UART */
+void uart_init(void) {
+    /* Сбрасываем FIFO UART */
+    XUartLite_WriteReg(XPAR_AXI_UARTLITE_0_BASEADDR, XUL_CONTROL_REG_OFFSET, 0x03);
+    XUartLite_WriteReg(XPAR_AXI_UARTLITE_0_BASEADDR, XUL_CONTROL_REG_OFFSET, 0x00);
+
+    xil_printf("UART инициализирован (AXI UART Lite)\r\n");
+}
+
+/* Инициализация консоли */
+void console_init(void) {
+    /* Инициализируем UART */
+    uart_init();
+
+    input_index = 0;
+    memset(input_buffer, 0, sizeof(input_buffer));
+
+    xil_printf("\r\n\n");
+    xil_printf("=========================================\r\n");
+    xil_printf("    КОНСОЛЬНОЕ ПРИЛОЖЕНИЕ ПЛАТЫ\r\n");
+    xil_printf("=========================================\r\n");
+    xil_printf("Плата: Nexys 4 DDR\r\n");
+    xil_printf("UART: AXI UART Lite\r\n");
+    xil_printf("Скорость: 115200 bps\r\n");
+    xil_printf("Готов к приему команд...\r\n");
+    print_menu();
+    xil_printf("\r\n> ");
+}
+
+/* Главная функция обработки консоли */
+void console_process(void) {
+    char c;
+
+    /* Проверяем ввод с UART */
+    if (check_uart_input()) {
+        c = read_uart_char();
+
+        /* Эхо символа (кроме управляющих) */
+        if (c >= 32 && c <= 126) {
+            xil_printf("%c", c);
+        }
+
+        /* Обработка Enter */
+        if (c == '\r' || c == '\n') {
+            xil_printf("\r\n");
+
+            if (input_index > 0) {
+                input_buffer[input_index] = '\0';
+                execute_command(input_buffer);
+            }
+
+            input_index = 0;
+            memset(input_buffer, 0, sizeof(input_buffer));
+            xil_printf("> ");
+        }
+        /* Обработка Backspace */
+        else if (c == 0x7F || c == 0x08) { // Backspace или Delete
+            if (input_index > 0) {
+                input_index--;
+                input_buffer[input_index] = '\0';
+                xil_printf("\b \b"); // Стираем символ на экране
+            }
+        }
+        /* Обычный символ */
+        else if (input_index < INPUT_BUFFER_SIZE - 1 && c >= 32 && c <= 126) {
+            input_buffer[input_index++] = c;
+        }
+        /* Управляющие символы (не выводим) */
+        else if (c < 32) {
+            // Игнорируем управляющие символы
+        }
+    }
+}
+
+/* Выполнение команды */
+void execute_command(const char *input) {
+    int i;
+    int command_found = 0;
+    char command[32];
+
+    /* Копируем и нормализуем команду */
+    strncpy(command, input, sizeof(command) - 1);
+    command[sizeof(command) - 1] = '\0';
+
+    /* Удаляем пробелы в конце */
+    char *end = command + strlen(command) - 1;
+    while (end > command && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n')) {
+        *end = '\0';
+        end--;
+    }
+
+    /* Пропускаем пробелы в начале */
+    char *start = command;
+    while (*start == ' ' || *start == '\t') {
+        start++;
+    }
+
+    /* Поиск команды в таблице */
+    for (i = 0; commands[i].name != NULL; i++) {
+        if (strcmp(start, commands[i].name) == 0) {
+            commands[i].function();
+            command_found = 1;
+            break;
+        }
+    }
+
+    if (!command_found && strlen(start) > 0) {
+        xil_printf("Неизвестная команда: '%s'\r\n", start);
+        xil_printf("Введите 'help' для списка команд\r\n");
+    }
+}
+
+/* Команда: помощь */
+void cmd_help(void) {
+    int i;
+
+    xil_printf("\r\n=== Доступные команды ===\r\n");
+    for (i = 0; commands[i].name != NULL; i++) {
+        xil_printf("  %-10s - %s\r\n", commands[i].name, commands[i].description);
+    }
+    xil_printf("==========================\r\n");
+}
+
+/* Команда: статус */
+void cmd_status(void) {
+    int connections, data_flag;
+    char last_data[256];
+
+    get_network_stats(&connections, &data_flag, last_data);
+
+    xil_printf("\r\n=== Статус системы ===\r\n");
+    xil_printf("Плата: Nexys 4 DDR\r\n");
+    xil_printf("Процессор: MicroBlaze\r\n");
+    xil_printf("Сетевой режим: Активен\r\n");
+    xil_printf("Активных TCP соединений: %d\r\n", connections);
+    xil_printf("Порт TCP: 12345\r\n");
+    xil_printf("IP адрес: 192.168.1.10\r\n");
+
+    if (data_flag && last_data[0] != '\0') {
+        xil_printf("Последние полученные данные: %s\r\n", last_data);
+    } else {
+        xil_printf("Статус: Ожидание сетевых данных\r\n");
+    }
+    xil_printf("Консоль UART: Активна\r\n");
+}
+
+/* Команда: отправка тестовых данных */
+void cmd_send_data(void) {
+    xil_printf("\r\n=== Отправка тестовых данных ===\r\n");
+    xil_printf("Формирование тестового пакета...\r\n");
+
+    /* Тестовые данные разных типов */
+    const char *test_messages[] = {
+        "Hello from Nexys 4 DDR!",
+        "Temperature: 25.5C",
+        "Sensor data: {id: 1, value: 123}",
+        "Test message for processing",
+        NULL
+    };
+
+    for (int i = 0; test_messages[i] != NULL; i++) {
+        xil_printf("Пакет %d: %s\r\n", i + 1, test_messages[i]);
+    }
+
+    xil_printf("Все пакеты готовы к отправке\r\n");
+    xil_printf("(Для реальной отправки подключитесь к порту 12345)\r\n");
+}
+
+/* Команда: обработка данных */
+void cmd_process_data(void) {
+    char test_data[] = "Console Test Data 123 ABC";
+    xil_printf("\r\n=== Обработка тестовых данных ===\r\n");
+    xil_printf("Исходные данные: %s\r\n", test_data);
+
+    /* Сохраняем копию для демонстрации */
+    char original_data[64];
+    strcpy(original_data, test_data);
+
+    /* Обрабатываем данные */
+    process_received_data(test_data, strlen(test_data));
+
+    xil_printf("Обработанные данные: %s\r\n", test_data);
+    xil_printf("Изменения: инверсия регистра + добавлен префикс\r\n");
+}
+
+/* Команда: сетевая информация */
+void cmd_network_info(void) {
+    xil_printf("\r\n=== Сетевая информация ===\r\n");
+    xil_printf("MAC адрес: 00:0A:35:00:01:02\r\n");
+    xil_printf("IP адрес: 192.168.1.10\r\n");
+    xil_printf("Маска подсети: 255.255.255.0\r\n");
+    xil_printf("Шлюз: 192.168.1.1\r\n");
+    xil_printf("TCP порт: 12345\r\n");
+    xil_printf("Протокол: TCP\r\n");
+    xil_printf("Стек: lwIP\r\n");
+    xil_printf("Режим: Статический IP\r\n");
+}
+
+/* Команда: очистка экрана */
+void cmd_clear_screen(void) {
+    /* Отправляем escape-последовательности для очистки терминала */
+    xil_printf("\033[2J");    // Очистка экрана
+    xil_printf("\033[1;1H");  // Курсор в начало
+
+    xil_printf("=========================================\r\n");
+    xil_printf("    КОНСОЛЬНОЕ ПРИЛОЖЕНИЕ ПЛАТЫ\r\n");
+    xil_printf("=========================================\r\n");
+    xil_printf("Экран очищен\r\n");
+    print_menu();
+    xil_printf("\r\n> ");
+}
+
+/* Печать меню */
+void print_menu(void) {
+    xil_printf("\r\nДоступные команды:\r\n");
+    xil_printf("  help    - показать все команды\r\n");
+    xil_printf("  status  - статус системы\r\n");
+    xil_printf("  send    - отправить тестовые данные\r\n");
+    xil_printf("  process - обработать тестовые данные\r\n");
+    xil_printf("  netinfo - сетевая информация\r\n");
+    xil_printf("  clear   - очистить экран\r\n");
+}
